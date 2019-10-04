@@ -1,0 +1,128 @@
+import sys
+sys.path.append('/home/chenani/ownCloud/Workspaces/Eclipse/dataAnalysis/Sleep-current/src/')
+import matplotlib.pyplot as pl
+import numpy as np
+import pickle as pkl
+import pandas as pd
+import Recordings
+import signale, trajectory
+import os
+from scipy.signal import argrelextrema
+from scipy.signal import gaussian
+from scipy.stats import pearsonr
+from scipy.stats import binom_test
+#################################################
+def subsequence(sub,ref):
+    '''
+    A function to determine the number of specefic sequence repeated within a larger sequence.
+
+    Parameters:
+    sub:
+    ref:
+
+
+    Returns:
+    idx : This an array containing the index of elements of sub in the ref! if idx is stricktly increasing the sequence sub
+    is replayed whithin sequence ref!
+    '''
+    ref = np.array(ref)
+    idx = np.array([])
+    for ii in range(len(sub)):
+        index = np.where(ref == sub[ii])[0]
+        if index.size:
+            idx = np.append(idx,index)
+    idx = np.int0(idx)
+    if idx.size:
+        return idx, True
+    else:
+        return np.array([]) , False
+def locate(pattern, root=os.curdir):
+    '''Locate all files matching supplied filename pattern in and below
+        supplied root directory.
+    '''
+    for path, dirs, files in os.walk(os.path.abspath(root)):
+        for filename in fnmatch.filter(files, pattern):
+            yield [path,filename]
+def findClosestPoint(values,array):
+    values = np.array(values)
+    array = np.array(array)
+    idx = np.array([np.square(array - value).argmin() for value in values])
+    return idx,array[idx]
+def coincidence(spikes):
+    spikes.burstDetector()
+    spikes.MuaDetector()
+    mua = spikes.MultiUnitFiring
+    ccdc = []
+    for k in range(len(spikes)):
+        for i in range(spikes[k].spike_times.size):
+            less = np.where(mua[:, 0] < spikes[k].spike_times[i])[0]  # Ripples started before spike!
+            more = np.where(mua[:, 1] > spikes[k].spike_times[i])[0]  # Ripples ended after spike!
+            mua_idx = np.intersect1d(less, more)  # index of the ripple covering the spike!
+            if mua_idx.size:
+                ccdc.append([k, i, mua_idx])
+    ccdc = np.array(ccdc)
+    ccdc = ccdc[np.argsort(ccdc[:, 2])]  # sorting w.r.t ripple index
+    spikes.overlap = ccdc
+def MUA(spikes):
+
+        if not hasattr(spikes, 'overlap'):
+            print 'There is no overlap detected between spikes and ripples, calculating using default arguments...'
+            spikes.coincidence()
+        mua = []  # Multi Unit Activity
+        bursts = []  # This keeps the firing activity(>=2spikes) during ripples
+        repetition = []  # Contains the number of spikes in each ripple!
+        ripp_set = set(spikes.overlap[:, 2])  # Keeps the tags of ripples containing MUA!
+
+        for item in ripp_set:
+            repetition.append([item, np.where(spikes.overlap[:, 2] == item)[0].size])
+        repetition = np.array(repetition)
+        spikes.rippleSpikeContent = repetition
+
+        for item in repetition[:, 0]:
+            activity_block = spikes.overlap[np.where(spikes.overlap[:, 2] == item)]
+            if not activity_block[:, 0].mean() == activity_block[0, 0]:
+                mua.append(activity_block)
+        spikes.MultiUnitActivity = mua
+def sequencing(spikes):
+        '''
+        This function sequences the events detected by MUA() function
+
+        Parameters
+        ----------
+        Returns
+        ----------
+        sequence_1st_spike :
+        sequence_median :
+
+        See also
+        ----------
+        coincidence, MUA
+
+        Notes
+        ----------
+         It takes the result of MUA function as input.
+        '''
+        fst_spk_sq = []
+        median_sq = []  # Sequences based on first spike times!
+        for item in spikes.MultiUnitActivity:
+            cells = set(item[:, 0])
+            sequence = []
+            for jtem in cells:
+                row_idx = np.where(item[:, 0] == jtem)[0]
+                spk_times = spikes[jtem].spike_times[item[row_idx, 1]]  # This returns the spike times of a specific cell.
+                sequence.append([jtem, spk_times.min(), np.median(spk_times), spk_times.size, item[0, 2]]) #No use for the last 2! Why did i put them there?
+            sequence = np.array(sequence)
+            sequence = sequence[np.argsort(sequence[:, 1])]
+            fst_spk_sq.append(sequence)
+            sequence = sequence[np.argsort(sequence[:, 2])]
+            median_sq.append(sequence)
+        spikes.sequence_1st_spike = fst_spk_sq
+        spikes.sequence_median = median_sq
+#########################################################################3
+if len(sys.argv) > 4:
+    parrentFolder = sys.argv[1]
+    dataFolder = sys.argv[2]
+    Nsub = int(sys.argv[3])
+placeCellList = parrentFolder + 'placeCells.spk'
+trajectory    = parrentFolder + 'linearTrack_Trajectory.traj'
+print placeCellList,trajectory
